@@ -1,0 +1,67 @@
+{{- if eq (include "pihole.kind" .) "StatefulSet" }}
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ template "pihole.fullname" . }}
+  labels:
+    app: {{ template "pihole.name" . }}
+    app.kubernetes.io/name: {{ template "pihole.name" . }}
+    chart: {{ template "pihole.chart" . }}
+    release: {{ .Release.Name }}
+    heritage: {{ .Release.Service }}
+  {{- with .Values.deploymentAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  serviceName: {{ include "pihole.statefulset.serviceName" . }}
+  podManagementPolicy: {{ .Values.statefulset.podManagementPolicy }}
+  {{- if .Values.revisionHistoryLimit }}
+  revisionHistoryLimit: {{ .Values.revisionHistoryLimit }}
+  {{- end }}
+  updateStrategy:
+    type: {{ .Values.statefulset.updateStrategy.type }}
+    {{- if and (eq .Values.statefulset.updateStrategy.type "RollingUpdate") (.Values.statefulset.updateStrategy.rollingUpdate) }}
+    rollingUpdate:
+      {{- toYaml .Values.statefulset.updateStrategy.rollingUpdate | nindent 6 }}
+    {{- end }}
+  {{- with .Values.statefulset.persistentVolumeClaimRetentionPolicy }}
+  persistentVolumeClaimRetentionPolicy:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  selector:
+    matchLabels:
+      app: {{ template "pihole.name" . }}
+      release: {{ .Release.Name }}
+  template:
+    {{- include "pihole.podTemplate" . | nindent 4 }}
+  {{- if include "pihole.useVolumeClaimTemplate" . }}
+  volumeClaimTemplates:
+  - metadata:
+      name: config
+      labels:
+        app: {{ template "pihole.name" . }}
+        chart: {{ .Chart.Name }}-{{ .Chart.Version }}
+        component: "{{ .Values.persistentVolumeClaim.name }}"
+        heritage: {{ .Release.Service }}
+        release: {{ .Release.Name }}
+      {{- with .Values.persistentVolumeClaim.annotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      accessModes:
+        {{- toYaml .Values.persistentVolumeClaim.accessModes | nindent 8 }}
+      {{- if .Values.persistentVolumeClaim.storageClass }}
+      {{- if (eq "-" .Values.persistentVolumeClaim.storageClass) }}
+      storageClassName: ""
+      {{- else }}
+      storageClassName: "{{ .Values.persistentVolumeClaim.storageClass }}"
+      {{- end }}
+      {{- end }}
+      resources:
+        requests:
+          storage: "{{ .Values.persistentVolumeClaim.size }}"
+  {{- end }}
+{{- end }}

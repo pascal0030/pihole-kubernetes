@@ -5,6 +5,23 @@ Pi-hole Helm Chart Deployment
    - Namespace: {{ .Release.Namespace }}
    - Chart Name: {{ .Chart.Name }}
    - Chart Version: {{ .Chart.Version }}
+   - Workload Kind: {{ include "pihole.kind" . }}
+   - Replicas: {{ .Values.replicaCount }}
+{{- if eq (include "pihole.kind" .) "StatefulSet" }}
+{{- if include "pihole.useVolumeClaimTemplate" . }}
+   - Storage: one PersistentVolumeClaim of {{ .Values.persistentVolumeClaim.size }} per replica
+     (config-{{ template "pihole.fullname" . }}-0, config-{{ template "pihole.fullname" . }}-1, ...).
+     Every replica keeps its own gravity database, so only its very first boot is slow.
+{{- else if .Values.persistentVolumeClaim.enabled }}
+   - Storage: all replicas share the PersistentVolumeClaim {{ if .Values.persistentVolumeClaim.existingClaim }}{{ .Values.persistentVolumeClaim.existingClaim }}{{ else }}{{ template "pihole.fullname" . }}{{ end }}.
+     Set `statefulset.volumeClaimTemplates.enabled=true` to give every replica its own volume.
+{{- else }}
+   - Storage: emptyDir, the gravity database is rebuilt on every pod start. Set
+     `persistentVolumeClaim.enabled=true` to give every replica a persistent volume.
+{{- end }}
+   - Each replica is reachable under its own name:
+     {{ template "pihole.fullname" . }}-0.{{ include "pihole.statefulset.serviceName" . }}.{{ .Release.Namespace }}.svc.cluster.local
+{{- end }}
 
 2. Pi-hole Service Information:
    - Service Name: {{ template "pihole.fullname" . }}-web

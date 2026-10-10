@@ -1,5 +1,6 @@
 {{- if .Values.persistentVolumeClaim.enabled -}}
 {{- if not .Values.persistentVolumeClaim.existingClaim -}}
+{{- if not (include "pihole.useVolumeClaimTemplate" .) -}}
 apiVersion: "v1"
 kind: "PersistentVolumeClaim"
 metadata:
@@ -27,5 +28,6 @@ spec:
   resources:
     requests:
       storage: "{{ .Values.persistentVolumeClaim.size }}"
+{{- end -}}
 {{- end -}}
 {{- end -}}

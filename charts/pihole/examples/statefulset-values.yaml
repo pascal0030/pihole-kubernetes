@@ -1,0 +1,51 @@
+# Run pihole as a StatefulSet so every replica gets its own PersistentVolumeClaim.
+#
+# Each replica keeps its own /etc/pihole across restarts and reschedules, so it does
+# not have to download the adlists and rebuild the gravity database on every boot.
+# Scaling up creates a new claim (config-<release>-pihole-1, ...), the first
+# boot of that replica is the only slow one.
+
+deploymentMode: StatefulSet
+
+replicaCount: 3
+
+persistentVolumeClaim:
+  enabled: true
+  size: "500Mi"
+  accessModes:
+    - ReadWriteOnce
+  # Pick a storage class that can provision one volume per replica.
+  # storageClass: "local-path"
+
+statefulset:
+  # The replicas do not depend on each other, so start them all at once.
+  podManagementPolicy: Parallel
+  volumeClaimTemplates:
+    enabled: true
+  # Keep the volumes when a replica is removed or the release is deleted, so a
+  # later scale up reuses the already populated volume.
+  persistentVolumeClaimRetentionPolicy:
+    whenDeleted: Retain
+    whenScaled: Retain
+
+# Spread the replicas over different nodes so a node failure does not take out DNS.
+topologySpreadConstraints:
+  - maxSkew: 1
+    topologyKey: kubernetes.io/hostname
+    whenUnsatisfiable: ScheduleAnyway
+    labelSelector:
+      matchLabels:
+        app: pihole
+
+# Keep at least one replica serving DNS during a rolling update or a node drain.
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
+
+serviceDns:
+  type: LoadBalancer
+  # loadBalancerIP: 192.168.178.252
+
+serviceWeb:
+  type: LoadBalancer
+  # loadBalancerIP: 192.168.178.252

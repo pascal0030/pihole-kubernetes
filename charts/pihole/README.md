@@ -36,6 +36,72 @@ The following items can be set via `--set` flag during installation or configure
 - **ClusterIP**: Exposes the service on a cluster-internal IP. Choosing this value makes the service only reachable from within the cluster.
 - **LoadBalancer**: Exposes the service externally using a cloud provider’s load balancer.
 
+#### Choose the deployment mode
+
+The chart can run pihole either as a `Deployment` (the default) or as a `StatefulSet`,
+controlled by `deploymentMode`:
+
+```yaml
+deploymentMode: Deployment # or StatefulSet
+```
+
+- **Deployment**: all replicas share the single `PersistentVolumeClaim` created from the
+  `persistentVolumeClaim` section. Because that claim is usually `ReadWriteOnce`, running
+  more than one replica normally means running them without persistence, so every pod has
+  to download the adlists and rebuild the gravity database on each start.
+- **StatefulSet**: every replica gets its own `PersistentVolumeClaim` from
+  `spec.volumeClaimTemplates`, built from the same `persistentVolumeClaim` settings. The
+  replicas keep their `/etc/pihole` across restarts and reschedules, which removes the long
+  boot time, and `ReadWriteOnce` storage is enough because no two pods share a volume.
+
+To run three replicas that each keep their own database:
+
+```yaml
+deploymentMode: StatefulSet
+replicaCount: 3
+persistentVolumeClaim:
+  enabled: true
+  size: 500Mi
+```
+
+This creates the claims `config-<release>-pihole-0`, `config-<release>-pihole-1` and
+`config-<release>-pihole-2`. A full example is in
+[examples/statefulset-values.yaml](examples/statefulset-values.yaml).
+
+Things worth knowing about the `StatefulSet` mode:
+
+- The chart adds a headless service (`<release>-pihole-headless`) so each replica also has a
+  stable DNS name of its own, for example
+  `<release>-pihole-0.<release>-pihole-headless.<namespace>.svc.cluster.local`. Disable it
+  with `statefulset.headlessService.enabled=false`, or point the `StatefulSet` at a service
+  you manage yourself with `statefulset.serviceName`. The regular `serviceDns`, `serviceWeb`
+  and `serviceDhcp` services keep working unchanged and still load balance over all replicas.
+- Rollouts are controlled by `statefulset.updateStrategy` instead of `strategyType`,
+  `maxSurge` and `maxUnavailable`, which only apply to the `Deployment`.
+- `statefulset.podManagementPolicy` defaults to `Parallel`, since the pihole replicas are
+  independent of each other and do not need to be started one after another.
+- The generated claims outlive the release by default. Set
+  `statefulset.persistentVolumeClaimRetentionPolicy` if you want Kubernetes to delete them
+  when the `StatefulSet` is deleted or scaled down (requires Kubernetes 1.27 or newer).
+- `hostname` is ignored, because the `StatefulSet` controller sets each pod's hostname to
+  its own pod name.
+- Set `statefulset.volumeClaimTemplates.enabled=false` to keep the previous behaviour of one
+  shared claim for all replicas. The chart also falls back to a shared volume when
+  `persistentVolumeClaim.existingClaim` is set.
+
+#### Switching an existing release between the two modes
+
+`Deployment` and `StatefulSet` are separate resources, so Helm creates the new workload and
+deletes the old one during the upgrade. Expect DNS to be unavailable for a moment, and plan
+for the data:
+
+- The `StatefulSet` claims are named `config-<release>-pihole-<ordinal>` and start out empty,
+  so the first boot of every replica rebuilds the gravity database. The claim of the former
+  `Deployment` (`<release>-pihole`) is *not* reused and is left behind untouched, so you can
+  copy its content into `config-<release>-pihole-0` first, or delete it once you are done.
+- Going back to `Deployment` leaves the per-replica claims in place; they are not removed
+  unless you set a retention policy or delete them yourself.
+
 ## My settings in values.yaml
 
 ```console
@@ -182,6 +248,7 @@ The following table lists the configurable parameters of the pihole chart and th
 | customVolumes.config | object | `{}` | any volume type can be used here |
 | customVolumes.enabled | bool | `false` | set this to true to enable custom volumes |
 | deploymentAnnotations | object | `{}` | Additional annotations for the deployment |
+| deploymentMode | string | `"Deployment"` | The kind of workload used to run pihole. Either `Deployment` or `StatefulSet`. A `StatefulSet` gives every replica its own `PersistentVolumeClaim` through `volumeClaimTemplates` (see the `statefulset` section below), so each replica keeps its gravity database across restarts instead of rebuilding it on every boot. |
 | dnsHostPort.enabled | bool | `false` | set this to true to enable dnsHostPort |
 | dnsHostPort.port | int | `53` | default port for this pod |
 | dnsmasq | object | `{"additionalHostsEntries":[],"customCnameEntries":[],"customDnsEntries":[],"customSettings":null,"enableCustomDnsMasq":true,"staticDhcpEntries":[],"upstreamServers":[]}` | DNS MASQ settings |
@@ -229,8 +296,8 @@ The following table lists the configurable parameters of the pihole chart and th
 | ingress | object | `{"annotations":{},"enabled":false,"hosts":["chart-example.local"],"path":"/","pathType":"ImplementationSpecific","tls":[]}` | Configuration for the Ingress |
 | ingress.annotations | object | `{}` | Annotations for the ingress |
 | ingress.enabled | bool | `false` | Generate a Ingress resource |
-| maxSurge | int | `1` | The maximum number of Pods that can be created over the desired number of `ReplicaSet` during updating. |
-| maxUnavailable | int | `1` | The maximum number of Pods that can be unavailable during updating |
+| maxSurge | int | `1` | The maximum number of Pods that can be created over the desired number of `ReplicaSet` during updating. Only used if `deploymentMode` is `Deployment`. |
+| maxUnavailable | int | `1` | The maximum number of Pods that can be unavailable during updating. Only used if `deploymentMode` is `Deployment`. |
 | monitoring.podMonitor | object | `{"enabled":false}` | Preferably adding prometheus scrape annotations rather than enabling podMonitor. |
 | monitoring.podMonitor.enabled | bool | `false` | set this to true to enable podMonitor |
 | monitoring.sidecar | object | `{"enabled":false,"image":{"pullPolicy":"IfNotPresent","repository":"ekofr/pihole-exporter","tag":"v1.0.0"},"port":9617,"resources":{"limits":{"memory":"128Mi"}}}` | Sidecar configuration |
@@ -301,7 +368,20 @@ The following table lists the configurable parameters of the pihole chart and th
 | serviceWeb.loadBalancerIP | string | `""` | A fixed `spec.loadBalancerIP` for the web interface Service |
 | serviceWeb.loadBalancerIPv6 | string | `""` | A fixed `spec.loadBalancerIP` for the IPv6 web interface Service |
 | serviceWeb.type | string | `"ClusterIP"` | `spec.type` for the web interface Service |
-| strategyType | string | `"RollingUpdate"` | The `spec.strategyTpye` for updates |
+| statefulset | object | `{"headlessService":{"annotations":{},"enabled":true,"extraLabels":{}},"persistentVolumeClaimRetentionPolicy":{},"podManagementPolicy":"Parallel","serviceName":"","updateStrategy":{"rollingUpdate":{},"type":"RollingUpdate"},"volumeClaimTemplates":{"enabled":true}}` | `StatefulSet` specific configuration, only used if `deploymentMode` is set to `StatefulSet` |
+| statefulset.headlessService | object | `{"annotations":{},"enabled":true,"extraLabels":{}}` | The headless service that gives every replica a stable DNS name |
+| statefulset.headlessService.annotations | object | `{}` | Annotations for the headless service |
+| statefulset.headlessService.enabled | bool | `true` | set to false if you do not want the chart to create a headless service |
+| statefulset.headlessService.extraLabels | object | `{}` | Labels for the headless service |
+| statefulset.persistentVolumeClaimRetentionPolicy | object | `{}` | `spec.persistentVolumeClaimRetentionPolicy`, decides what happens to the generated claims when the `StatefulSet` is deleted or scaled down. Leave empty to keep them. |
+| statefulset.podManagementPolicy | string | `"Parallel"` | `spec.podManagementPolicy`. The pihole replicas are independent of each other, so `Parallel` starts and scales them all at once instead of one after another. |
+| statefulset.serviceName | string | `""` | `spec.serviceName`. Set this to govern the `StatefulSet` with a service you manage yourself, which also stops the chart from creating its own headless service. |
+| statefulset.updateStrategy | object | `{"rollingUpdate":{},"type":"RollingUpdate"}` | `spec.updateStrategy` |
+| statefulset.updateStrategy.rollingUpdate | object | `{}` | `spec.updateStrategy.rollingUpdate`, only used if `type` is `RollingUpdate` |
+| statefulset.updateStrategy.type | string | `"RollingUpdate"` | `spec.updateStrategy.type`, either `RollingUpdate` or `OnDelete` |
+| statefulset.volumeClaimTemplates | object | `{"enabled":true}` | `spec.volumeClaimTemplates` configuration. If enabled, one `PersistentVolumeClaim` is created per replica from the `persistentVolumeClaim` settings, instead of a single claim shared by all replicas. Requires `persistentVolumeClaim.enabled` to be `true` and is ignored if `persistentVolumeClaim.existingClaim` is set. |
+| statefulset.volumeClaimTemplates.enabled | bool | `true` | set to false to mount the same volume in every replica instead |
+| strategyType | string | `"RollingUpdate"` | The `spec.strategyType` for updates. Only used if `deploymentMode` is `Deployment`, see `statefulset.updateStrategy` otherwise. |
 | tolerations | list | `[]` | Toleration |
 | topologySpreadConstraints | list | `[]` | Specify a priorityClassName priorityClassName: "" Reference: https://kubernetes.io/docs/concepts/workloads/pods/pod-topology-spread-constraints/ |
 | virtualHost | string | `"pi.hole"` |  |

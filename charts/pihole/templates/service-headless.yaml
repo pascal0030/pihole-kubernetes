@@ -1,0 +1,40 @@
+{{- if and (eq (include "pihole.kind" .) "StatefulSet") .Values.statefulset.headlessService.enabled (not .Values.statefulset.serviceName) }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "pihole.statefulset.serviceName" . }}
+  labels:
+    app: {{ template "pihole.name" . }}
+    chart: {{ template "pihole.chart" . }}
+    release: {{ .Release.Name }}
+    heritage: {{ .Release.Service }}
+    {{- with .Values.statefulset.headlessService.extraLabels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+  {{- with .Values.statefulset.headlessService.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: ClusterIP
+  clusterIP: None
+  # Give every replica a stable DNS name as soon as it is created, so a pod can
+  # be addressed while it is still importing its gravity database.
+  publishNotReadyAddresses: true
+  ports:
+    - port: {{ .Values.webHttp }}
+      targetPort: http
+      protocol: TCP
+      name: http
+    - port: 53
+      targetPort: dns
+      protocol: TCP
+      name: dns-tcp
+    - port: 53
+      targetPort: dns-udp
+      protocol: UDP
+      name: dns-udp
+  selector:
+    app: {{ template "pihole.name" . }}
+    release: {{ .Release.Name }}
+{{- end }}

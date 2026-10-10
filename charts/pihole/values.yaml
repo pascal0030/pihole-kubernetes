@@ -2,16 +2,65 @@
 # This is a YAML-formatted file
 # Declare variables to be passed into your templates.
 
+# -- The kind of workload used to run pihole. Either `Deployment` or `StatefulSet`.
+# A `StatefulSet` gives every replica its own `PersistentVolumeClaim` through
+# `volumeClaimTemplates` (see the `statefulset` section below), so each replica keeps
+# its gravity database across restarts instead of rebuilding it on every boot.
+deploymentMode: Deployment
+
+# -- `StatefulSet` specific configuration, only used if `deploymentMode` is set to `StatefulSet`
+statefulset:
+  # -- `spec.podManagementPolicy`. The pihole replicas are independent of each other,
+  # so `Parallel` starts and scales them all at once instead of one after another.
+  podManagementPolicy: Parallel
+
+  # -- `spec.updateStrategy`
+  updateStrategy:
+    # -- `spec.updateStrategy.type`, either `RollingUpdate` or `OnDelete`
+    type: RollingUpdate
+    # -- `spec.updateStrategy.rollingUpdate`, only used if `type` is `RollingUpdate`
+    rollingUpdate: {}
+      # partition: 0
+      # maxUnavailable: 1
+
+  # -- `spec.volumeClaimTemplates` configuration. If enabled, one `PersistentVolumeClaim`
+  # is created per replica from the `persistentVolumeClaim` settings, instead of a
+  # single claim shared by all replicas. Requires `persistentVolumeClaim.enabled` to be
+  # `true` and is ignored if `persistentVolumeClaim.existingClaim` is set.
+  volumeClaimTemplates:
+    # -- set to false to mount the same volume in every replica instead
+    enabled: true
+
+  # -- `spec.persistentVolumeClaimRetentionPolicy`, decides what happens to the generated
+  # claims when the `StatefulSet` is deleted or scaled down. Leave empty to keep them.
+  persistentVolumeClaimRetentionPolicy: {}
+    # whenDeleted: Retain
+    # whenScaled: Retain
+
+  # -- The headless service that gives every replica a stable DNS name
+  headlessService:
+    # -- set to false if you do not want the chart to create a headless service
+    enabled: true
+    # -- Annotations for the headless service
+    annotations: {}
+    # -- Labels for the headless service
+    extraLabels: {}
+
+  # -- `spec.serviceName`. Set this to govern the `StatefulSet` with a service you manage
+  # yourself, which also stops the chart from creating its own headless service.
+  serviceName: ""
+
 # -- The number of replicas
 replicaCount: 1
 
-# -- The `spec.strategyTpye` for updates
+# -- The `spec.strategyType` for updates. Only used if `deploymentMode` is `Deployment`,
+# see `statefulset.updateStrategy` otherwise.
 strategyType: RollingUpdate
 
-# -- The maximum number of Pods that can be created over the desired number of `ReplicaSet` during updating.
+# -- The maximum number of Pods that can be created over the desired number of `ReplicaSet` during updating. Only used if `deploymentMode` is `Deployment`.
 maxSurge: 1
 
-# -- The maximum number of Pods that can be unavailable during updating
+# -- The maximum number of Pods that can be unavailable during updating. Only used if `deploymentMode` is `Deployment`.
 maxUnavailable: 1
 
 # -- The number of old ReplicaSets to retain to allow rollback

@@ -1,0 +1,13 @@
+deploymentMode: StatefulSet
+
+persistentVolumeClaim:
+  enabled: true
+  size: "100Mi"
+
+statefulset:
+  podManagementPolicy: Parallel
+  volumeClaimTemplates:
+    enabled: true
+  persistentVolumeClaimRetentionPolicy:
+    whenDeleted: Delete
+    whenScaled: Delete

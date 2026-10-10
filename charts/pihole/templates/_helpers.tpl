@@ -37,3 +37,38 @@ Default password secret name.
 {{- define "pihole.password-secret" -}}
 {{- printf "%s-%s" (include "pihole.fullname" .) "password" | replace "+" "_" | trunc 63 | trimSuffix "-" -}}
 {{- end -}}
+
+{{/*
+The kind of workload to render, either "Deployment" or "StatefulSet".
+*/}}
+{{- define "pihole.kind" -}}
+{{- $kind := .Values.deploymentMode | default "Deployment" -}}
+{{- if not (has $kind (list "Deployment" "StatefulSet")) -}}
+{{- fail (printf "deploymentMode must be either \"Deployment\" or \"StatefulSet\", got %q" $kind) -}}
+{{- end -}}
+{{- $kind -}}
+{{- end -}}
+
+{{/*
+Returns a non empty string when the config volume is provisioned per replica
+through the StatefulSet `volumeClaimTemplates` instead of a single shared
+PersistentVolumeClaim.
+*/}}
+{{- define "pihole.useVolumeClaimTemplate" -}}
+{{- if and (eq (include "pihole.kind" .) "StatefulSet") .Values.statefulset.volumeClaimTemplates.enabled .Values.persistentVolumeClaim.enabled (not .Values.persistentVolumeClaim.existingClaim) -}}
+true
+{{- end -}}
+{{- end -}}
+
+{{/*
+The service that governs the StatefulSet, used as `spec.serviceName`.
+*/}}
+{{- define "pihole.statefulset.serviceName" -}}
+{{- if .Values.statefulset.serviceName -}}
+{{- .Values.statefulset.serviceName -}}
+{{- else if .Values.statefulset.headlessService.enabled -}}
+{{- printf "%s-headless" (include "pihole.fullname" .) | trunc 63 | trimSuffix "-" -}}
+{{- else -}}
+{{- include "pihole.fullname" . -}}
+{{- end -}}
+{{- end -}}
